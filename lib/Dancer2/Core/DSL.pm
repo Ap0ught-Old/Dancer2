@@ -90,6 +90,9 @@ sub dsl_keywords {
         path                 => { is_global => 1 },
         post                 => { is_global => 1 },
         prefix               => { is_global => 1 },
+        prepare_app          => {
+            is_global => 1, prototype => '&',
+        },
         psgi_app             => { is_global => 1 },
         push_header          => { is_global => 0 },
         push_response_header => { is_global => 0 },
@@ -214,6 +217,8 @@ sub options { shift->_normalize_route( [qw/options /], @_ ) }
 sub patch   { shift->_normalize_route( [qw/patch   /], @_ ) }
 sub post    { shift->_normalize_route( [qw/post    /], @_ ) }
 sub put     { shift->_normalize_route( [qw/put     /], @_ ) }
+
+sub prepare_app { push @{ shift->app->prep_apps }, @_ }
 
 sub any {
     my $self = shift;
@@ -507,6 +512,7 @@ __END__
 =func setting
 
 Lets you define settings and access them:
+
     setting('foo' => 42);
     setting('foo' => 42, 'bar' => 43);
     my $foo=setting('foo');
@@ -516,6 +522,7 @@ If settings were defined returns number of settings.
 =func set ()
 
 alias for L<setting>:
+
     set('foo' => '42');
     my $port=set('port');
 

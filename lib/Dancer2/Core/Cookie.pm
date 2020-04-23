@@ -41,7 +41,7 @@ sub xs_to_header {
             path     => $self->path,
             domain   => $self->domain,
             expires  => $self->expires,
-            httponly => $self->http_only,
+            httponly => !!$self->http_only, # HTTP::XSCookies seems to distinguish between '"0"' and '0'
             secure   => $self->secure,
             samesite => $self->same_site,
         }
@@ -129,7 +129,7 @@ has http_only => (
     is       => 'rw',
     isa      => Bool,
     required => 0,
-    default  => sub {0},
+    default  => sub {1},
 );
 
 has same_site => (

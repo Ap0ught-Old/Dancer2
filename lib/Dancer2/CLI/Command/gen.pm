@@ -10,7 +10,7 @@ use HTTP::Tiny;
 use File::Find;
 use File::Path 'mkpath';
 use File::Spec::Functions;
-use File::ShareDir 'dist_dir';
+use File::Share 'dist_dir';
 use File::Basename qw/dirname basename/;
 use Dancer2::Template::Simple;
 use Module::Runtime 'require_module';
@@ -110,10 +110,19 @@ NOYAML
     }
 
     print <<HOWTORUN;
-The application is ready to serve; to run it, do:
+
+Your new application is ready! To run it:
 
         cd $app_path
         plackup bin/app.psgi
+
+If you need community assistance, the following resources are available:
+- Dancer website: http://perldancer.org
+- Mailing list: http://lists.preshweb.co.uk/mailman/listinfo/dancer-users
+- IRC: irc.perl.org#dancer
+
+Happy Dancing!
+
 HOWTORUN
 
     return 0;
@@ -173,7 +182,7 @@ sub _copy_templates {
 
         {
             local $/;
-            open(my $fh, '<', $from) or die "unable to open file `$from' for reading: $!";
+            open(my $fh, '<:raw', $from) or die "unable to open file `$from' for reading: $!";
             $content = <$fh>;
             close $fh;
         }
@@ -182,7 +191,7 @@ sub _copy_templates {
             $content = _process_template($content, $vars);
         }
 
-        open(my $fh, '>', $to) or die "unable to open file `$to' for writing: $!";
+        open(my $fh, '>:raw', $to) or die "unable to open file `$to' for writing: $!";
         print $fh $content;
         close $fh;
 

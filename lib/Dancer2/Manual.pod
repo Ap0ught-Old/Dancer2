@@ -20,7 +20,8 @@ way, easily.
 
 =head1 INSTALL
 
-Installation of Dancer2 is simple:
+Installation of Dancer2 is simple, using your favourite method to install from
+CPAN, e.g.:
 
     perl -MCPAN -e 'install Dancer2'
 
@@ -32,6 +33,14 @@ least on Unix-like systems:
 
 (If you don't have root access, omit the 'sudo', and cpanminus will install
 Dancer2 and prereqs into C<~/perl5>.)
+
+Dancer2 is also available as a package from the package repository of several
+distributions, for example on Debian/Ubuntu you should be able to just:
+
+    apt-get install libdancer2-perl
+
+Do be aware, though, that distribution-packaged versions sometimes lag behind
+the most recent version on CPAN.
 
 =head1 BOOTSTRAPPING A NEW APP
 
@@ -178,11 +187,12 @@ requests.
 =head2 Route Handlers
 
 The route action is the code reference declared. It can access parameters
-through the specific C<route_parameters>, C<query_parameters>, and 
-C<body_parameters> keywords, which return a L<Hash::MultiValue> object. 
+through the specific L<route_parameters|/route_parameters>, 
+L<query_parameters|/query_parameters>, and  L<body_parameters|/body_parameters>
+keywords, which return a L<Hash::MultiValue> object. 
 This hashref is a merge of the route pattern matches and the request params.
 
-You can have more details about how params are built and how to access them
+You can find more details about how params are built and how to access them
 in the L<Dancer2::Core::Request> documentation.
 
 =head3 Declaring Routes
@@ -213,15 +223,63 @@ Each token found in a route pattern is used as a named-pattern match. Any
 match will be set in the route parameters.
 
     get '/hello/:name' => sub {
-        "Hey " . route_parameters->get('name') . ", welcome here!";
+        return "Hey " . route_parameters->get('name') . ", welcome here!";
     };
 
 Tokens can be optional, for example:
 
     get '/hello/:name?' => sub {
-        my $name = route_parameters->get('name') //= 'Whoever you are';
-        "Hello there, $name";
+        my $name = route_parameters->get('name') // 'Whoever you are';
+        return "Hello there, $name";
     };
+
+=head3 Named matching with type constraints
+
+Type constraints can be added to tokens.
+
+    get '/user/:id[Int]' => sub {
+        # matches /user/34 but not /user/jamesdean
+        my $user_id = route_parameters->get('id');
+    };
+
+    get '/user/:username[Str]' => sub {
+        # matches /user/jamesdean but not /user/34 since that is caught
+        # by previous route
+        my $username = route_parameters->get('username');
+    };
+
+You can even use type constraints to add a regexp check:
+
+    get '/book/:date[StrMatch[qr{\d\d\d\d-\d\d-\d\d}]]' => sub {
+        # matches /book/2014-02-04
+        my $date = route_parameters->get('date');
+    };
+
+The default type library is L<Dancer2::Core::Types> but any type library
+built using L<Type::Tiny>'s L<Type::Library> can be used instead.
+If you'd like to use a different default type library you must declare it
+in the configuration file, for example:
+
+    type_library: My::Type::Library
+
+Alternatively you can specify the type library in which the type is defined
+as part of the route definition:
+
+    get '/user/:username[My::Type::Library::Username]' => sub {
+        my $username = route_parameters->get('username');
+    };
+
+This will load C<My::Type::Library> and from it use the type C<Username>. This
+allows types to be used that are not part of the type library defined by config's
+C<type_library>.
+
+More complex constructs are allowed such as:
+
+    get '/some/:thing[Int|MyDate]' => sub {
+        ...;
+    };
+
+See L<Type::Registry/lookup($name)> for more details.
 
 =head3 Wildcard Matching
 
@@ -462,9 +520,10 @@ This is done with the B<pass> keyword, like in the following example
 =head1 HOOKS
 
 Hooks are code references (or anonymous subroutines) that are triggered at
-specific moments during the resolution of a request.
+specific moments during the resolution of a request.  They are set up using the
+L<hook|/hook> keyword.
 
-Many of them are supported by the core but plugins and engines can also
+Many of them are provided by Dancer2's core, but plugins and engines can also
 define their own.
 
 =over 4
@@ -475,7 +534,7 @@ C<before> hooks are evaluated before each request within the context of the
 request and receives as argument the app (a L<Dancer2::Core::App> object).
 
 It's possible to define variables which will be accessible in the action
-blocks with the keyword C<var>.
+blocks with the L<var keyword|/var>.
 
     hook before => sub {
         var note => 'Hi there';
@@ -584,7 +643,7 @@ string.
 
 =head2 Error Handling
 
-Refer to L<Error Handling|Dancer2::Manual/error-handling-1>
+Refer to L<Error Hooks|Dancer2::Manual/Error-Hooks>
 for details about the following hooks:
 
 =over 4
@@ -601,7 +660,7 @@ for details about the following hooks:
 
 =head2 File Rendering
 
-Refer to L<File Rendering|Dancer2::Manual/file-handler>
+Refer to L<File Handler|Dancer2::Manual/File-Handler>
 for details on the following hooks:
 
 =over 4
@@ -748,17 +807,25 @@ For example, the default config file for any Dancer2 application is as follows:
 
 =head2 Error Pages
 
-When an HTTP error occurs (the action responds with a status code other
-than 200), Dancer2 first looks in the public directory for a corresponding
-HTML file matching the error code (eg: 500.html or 404.html).
+When an HTTP error occurs (i.e. the action responds with a status code other
+than 200), this is how Dancer2 determines what page to display.
 
-If such a file exists, it's used to report the error, otherwise, a default
-error page will be rendered on the fly.
+=over
 
-Note that in order to provide more informative diagnostics, the default
-error page will override the error-code HTML files for errors with a C<5xx>
-status when B<show_errors> is set to true. For more information see
-L<Dancer2::Config>.
+=item * Looks in the C<views/> directory for a corresponding template file
+matching the error code (e.g. C<500.tt> or C<404.tt>). If such a file exists,
+it's used to report the error.
+
+=item * Next, looks in the C<public/> directory for a corresponding HTML file
+matching the error code (e.g. C<500.html> or C<404.html>). If such a file
+exists, it's used to report the error. (Note, however, that if B<show_errors>
+is set to true, in the case of a 500 error the static HTML page will not be
+shown, but will be replaced with a default error page containing more
+informative diagnostics. For more information see L<Dancer2::Config>.)
+
+=item * As default, render a generic error page on the fly.
+
+=back
 
 =head2 Execution Errors
 
@@ -766,15 +833,13 @@ When an error occurs during the route execution, Dancer2 will render an
 error page with the HTTP status code 500.
 
 It's possible either to display the content of the error message or to hide
-it with a generic error page.
-
-This is a choice left to the end-user and can be set with the B<show_errors>
-setting.
+it with a generic error page. This is a choice left to the end-user and can
+be controlled with the B<show_errors> setting (see above).
 
 Note that you can also choose to consider all warnings in your route
 handlers as errors when the setting B<warnings> is set to 1.
 
-=head2 Error handling
+=head2 Error Hooks
 
 When an error is caught by Dancer2's core, an exception object is built (of
 the class L<Dancer2::Core::Error>). This class provides a hook to let the
@@ -853,7 +918,7 @@ storage to help with debugging, but shouldn't be used on production systems.
 There are other session backends, such as L<Dancer2::Session::Memcached>,
 which are recommended for production use.
 
-You can then use the L<session|Dancer2/session> keyword to manipulate the
+You can then use the L<session|Dancer2::Manual/session> keyword to manipulate the
 session:
 
 =head3 Storing data in the session
@@ -875,8 +940,8 @@ Or, alternatively,
 =head3 Controlling where sessions are stored
 
 For disc-based session backends like L<Dancer2::Session::YAML>,
-L<Dancer2::Session::Storable> etc., session files are written to the session
-dir specified by the C<session_dir> setting, which defaults to C<./sessions>
+session files are written to the session dir specified by
+the C<session_dir> setting, which defaults to C<./sessions>
 if not specifically set.
 
 If you need to control where session files are created, you can do so
@@ -1007,7 +1072,7 @@ Get complete hash stored in session:
 In Dancer 2, a session backend consumes the role
 L<Dancer2::Core::Role::SessionFactory>.
 
-The following example using the Reddis session demonstrates how session
+The following example using the Redis session demonstrates how session
 engines are written in Dancer 2.
 
 First thing to do is to create the class for the session engine,
@@ -1250,6 +1315,51 @@ template toolkit, your config file will look like this:
           ENCODING: utf8
 
 
+=head2 Default Template Variables
+
+Every template knows about the following variables, which are provided by
+L<Dancer2::Core::Role::Template>. Some are similar to the keywords you can
+use in the Perl part of your Dancer2 application.
+
+=over 4
+
+=item * B<perl_version>
+
+Current version of perl, effectively
+L<C<$^V>|http://perldoc.perl.org/perlvar.html#%24%5eV>.
+
+=item * B<dancer_version>
+
+Current version of Dancer2, effectively C<< Dancer2->VERSION >>.
+
+=item * B<settings>
+
+A hash of the application configuration. This is like
+the L<config|Dancer2::Manual/config> keyword.
+
+=item * B<request>
+
+The current request object. This is like the L<request|Dancer2::Manual/request> keyword.
+
+=item * B<params>
+
+A hash reference of all the parameters.
+
+Currently the equivalent of C<< $request->params >>, and like the
+L<params|Dancer2::Manual/params> keyword.
+
+=item * B<vars>
+
+The list of request variables, which is what you would get if you
+called the L<vars|Dancer2::Manual/vars> keyword.
+
+=item * B<session>
+
+The current session data, if a session exists. This is like
+the L<session|Dancer2::Manual/session> keyword.
+
+=back
+
 =head1 STATIC FILES
 
 =head2 Static Directory
@@ -1324,8 +1434,14 @@ C<appdir/environments>. That way, the appropriate environment config file
 will be loaded according to the running environment (if none is specified,
 it will be 'development').
 
-Note that you can change the running environment using the C<--environment>
-command line switch.
+You can change the running environment when starting your app using the
+C<plackup> command's C<--env> or C<--E> switch:
+
+    plackup -E production bin/app.psgi
+
+Altenatively, you can set the
+L<C<DANCER_ENVIRONMENT>|https://metacpan.org/pod/Dancer2::Config#DANCER_ENVIRONMENT>
+environment variable in the shell or in your web server's configuration file.
 
 Typically, you'll want to set the following values in a development config
 file:
@@ -1344,7 +1460,9 @@ And in a production one:
 
 Please note that you are not limited to writing configuration files in YAML.
 Dancer2 supports any file format that is supported by L<Config::Any>, such
-as JSON, XML, INI files, and Apache-style config files.
+as JSON, XML, INI files, and Apache-style config files. See the Dancer2
+L<configuration guide|https://metacpan.org/pod/Dancer2::Config#MANIPULATING-SETTINGS-VIA-CONFIGURATION-FILES>
+for more information.
 
 =head2 Accessing configuration information
 
@@ -1608,7 +1726,7 @@ Assuming we have a different app that has two states we want to test:
      use Dancer2;
      set serializer => 'JSON';
 
-     get '/' => sub {
+     get '/:user' => sub {
          my $user = route_parameters->get('user');
 
          $user and return { user => $user };
@@ -1864,7 +1982,6 @@ If you want to use Plack middlewares, you need to enable them using
 L<Plack::Builder> as such:
 
     # in app.psgi or any other handler
-    use Dancer2;
     use MyApp;
     use Plack::Builder;
 
@@ -1872,7 +1989,7 @@ L<Plack::Builder> as such:
         enable 'Deflater';
         enable 'Session', store => 'File';
         enable 'Debug', panels => [ qw<DBITrace Memory Timer> ];
-        dance;
+        MyApp->to_app;
     };
 
 The nice thing about this setup is that it will work seamlessly through
@@ -1892,16 +2009,40 @@ If you want to set up a middleware for a specific path, you can do that using
 L<Plack::Builder> which uses L<Plack::App::URLMap>:
 
     # in your app.psgi or any other handler
-    use Dancer2;
     use MyApp;
     use Plack::Builder;
 
     my $special_handler = sub { ... };
 
     builder {
-        mount '/'        => dance;
         mount '/special' => $special_handler;
+        mount '/'        => MyApp->to_app;
     };
+
+=head3 Removing default middlewares
+
+By default, a Dancer2 app is automatically wrapped with the following middleware
+
+=over 4
+
+=item * L<Plack::Middleware::FixMissingBodyInRedirect>
+
+=item * L<Plack::Middleware::Head>
+
+=back
+
+You can configure the setting C<no_default_middleware> to a true value to stop your
+Dancer2 app being wrapped with these default middleware layers.
+
+    # in you Dancer2 app or config.yml
+    package MyApp;
+    use Dancer2
+
+    set no_default_middleware => true;
+
+This is necessary if you need to add eTag or ContentMD5 headers to
+C<HEAD> requests, and you are encouraged to manually add those default
+middleware back into your PSGI stack.
 
 =head3 Running on Perl web servers with plackup
 
@@ -1951,7 +2092,7 @@ F<app.psgi>) edit it to use L<Plack::Builder>, as described above:
 
     builder {
         enable 'Deflater';
-        dance;
+        MyApp->to_app;
     };
 
 To test if content compression works, trace the HTTP request and response
@@ -2435,6 +2576,26 @@ name.
         # will result in two headers "x-my-header" in the response
     }
 
+=head2 prepare_app
+
+You can introduce code you want to run when your app is loaded, similar to the
+C<prepare_app> in L<Plack::Middleware>.
+
+    prepare_app {
+        my $app = shift;
+
+        ... # do your thing
+    };
+
+You should not close over the App instance, since you receive it as a first
+argument. If you close over it, you B<will> have a memory leak.
+
+    my $app = app();
+
+    prepare_app {
+        do_something_with_app($app); # MEMORY LEAK
+    };
+
 =head2 hook
 
 Adds a hook at some position. For example :
@@ -2446,6 +2607,8 @@ Adds a hook at some position. For example :
 
 There can be multiple hooks assigned to a given position, and each will be
 executed in order.
+
+See the L<HOOKS|/HOOKS> section for a list of available hooks.
 
 =head2 info
 
@@ -2491,7 +2654,7 @@ parameters. Check C<param> below to access quickly to a single parameter
 value.
 
     post '/login' => sub {
-        // get all parameters as a single hash
+        # get all parameters as a single hash
         my %all_parameters = params;
 
         // request all parmameters from a specific source: body, query, route
@@ -2499,7 +2662,7 @@ value.
         my %route_parameters = params('route');
         my %query_parameters = params('query');
 
-        // any $source that is not body, query, or route generates an exception
+        # any $source that is not body, query, or route generates an exception
         params('fake_source'); // Unknown source params "fake_source"
     };
 
@@ -2857,6 +3020,9 @@ use.
    send_file( \$data, content_type => 'image/png'
                       filename     => 'onion.png' );
 
+By default the Content-Disposition header uses the "attachment" type, which
+triggers a "Save" dialog in some browsers. Supply a C<content_disposition>
+attribute of "inline" to have the file displayed inline by the browser.
 
 =head2 set
 
@@ -3042,8 +3208,9 @@ Or to request a specific layout, of course:
     };
 
 Some tokens are automatically added to your template (C<perl_version>,
-C<dancer_version>, C<settings>, C<request>, C<query_parameters>, C<body_parameters>, C<route_parameters>, C<vars> and, if you
-have sessions enabled, C<session>). Check L<Dancer2::Core::Role::Template>
+C<dancer_version>, C<settings>, C<request>, C<vars> and, if you
+have sessions enabled, C<session>). Check L<Default Template
+Variables|Dancer2::Manual/Default-Template-Variables>
 for further details.
 
 =head2 to_dumper ($structure)

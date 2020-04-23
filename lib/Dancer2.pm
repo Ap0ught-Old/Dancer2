@@ -133,20 +133,14 @@ Dancer2 is easy and fun:
 
     use Dancer2;
     get '/' => sub { "Hello World" };
-    dance;
+    dance; 
 
 This is the main module for the Dancer2 distribution. It contains logic for
 creating a new Dancer2 application.
 
-You are welcome to join our mailing list.
-For subscription information, mail address and archives see
-L<http://lists.preshweb.co.uk/mailman/listinfo/dancer-users>.
-
-We are also on IRC: #dancer on irc.perl.org.
-
 =head2 Documentation Index
 
-Documentation on Dancer2 is split into several manpages. Below is a
+Documentation on Dancer2 is split into several sections. Below is a
 complete outline on where to go for help.
 
 =over 4
@@ -203,6 +197,20 @@ Returns the current runner. It is of type L<Dancer2::Core::Runner>.
 
 =cut
 
+=head1 SECURITY REPORTS
+
+If you need to report a security vulnerability in Dancer2, send all pertinent
+information to L<mailto:dancer-security@dancer.pm>. These matters are taken
+extremely seriously, and will be addressed in the earliest timeframe possible.
+
+=head1 SUPPORT
+
+You are welcome to join our mailing list.
+For subscription information, mail address and archives see
+L<http://lists.preshweb.co.uk/mailman/listinfo/dancer-users>.
+
+We are also on IRC: #dancer on irc.perl.org.
+
 =head1 AUTHORS
 
 =head2 CORE DEVELOPERS
@@ -243,6 +251,7 @@ Returns the current runner. It is of type L<Dancer2::Core::Runner>.
     Bas Bloemsaat
     baynes
     Ben Hutton
+    Ben Kaufman
     biafra
     Blabos de Blebe
     Breno G. de Oliveira
@@ -253,30 +262,38 @@ Returns the current runner. It is of type L<Dancer2::Core::Runner>.
     chenchen000
     Chi Trinh
     Christian Walde
+    Christopher White
     Colin Kuskie
     cym0n
     Dale Gallagher
+    Dan Book (Grinnz)
+    Daniel Böhmer
     Daniel Muey
     Daniel Perrett
     Dave Jacoby
+    Dave Webb
     David (sbts)
     David Steinbrunner
     David Zurborg
     Davs
+    Deirdre Moran
     Dennis Lichtenthäler
     Dinis Rebolo
     dtcyganov
     Erik Smit
     Fayland Lam
+    ferki
     Gabor Szabo
     geistteufel
     Gideon D'souza
+    Gil Magno
     Glenn Fowler
     Graham Knop
     Gregor Herrmann
     Grzegorz Rożniecki
     Hobbestigrou
     Hunter McMillen
+    ice-lenor
     Ivan Bessarabov
     Ivan Kruglov
     JaHIY
@@ -289,9 +306,11 @@ Returns the current runner. It is of type L<Dancer2::Core::Runner>.
     Jean Stebens
     Jens Rehsack
     Joel Berger
+    Johannes Piehler
     Jonathan Cast
     Jonathan Scott Duff
-    Julien Fiegehenn
+    Joseph Frazer
+    Julien Fiegehenn (simbabque)
     Julio Fraire
     Kaitlyn Parkhurst (SYMKAT)
     kbeyazli
@@ -307,13 +326,17 @@ Returns the current runner. It is of type L<Dancer2::Core::Runner>.
     Matt Phillips
     Matt S Trout
     Maurice
+    MaxPerl
+    Ma_Sys.ma
     Menno Blom
     Michael Kröll
     Michał Wojciechowski
+    Mike Katasonov
     Mohammad S Anwar
     mokko
     Nick Patch
     Nick Tonkin
+    Nigel Gregoire
     Nikita K
     Nuno Carvalho
     Olaf Alders
@@ -330,19 +353,24 @@ Returns the current runner. It is of type L<Dancer2::Core::Runner>.
     Ricardo Signes
     Rick Yakubowski
     Ruben Amortegui
-    sakshee3
+    Sakshee Vijay (sakshee3)
     Sam Kington
     Samit Badle
+    Sebastien Deseille (sdeseille)
+    Sergiy Borodych
     Shlomi Fish
-    simbabque
     Slava Goltser
     Snigdha
+    Steve Dondley
     Tatsuhiko Miyagawa
+    Timothy Alexis Vass
     Tina Müller
     Tom Hukins
     Upasana Shukla
+    Utkarsh Gupta
     Vernon Lyon
     Victor Adam
     Vince Willems
     Vincent Bachelier
+    xenu
     Yves Orton

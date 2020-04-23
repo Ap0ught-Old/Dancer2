@@ -394,9 +394,13 @@ A basic script to start an application: (in C</service/application/run>)
 
 Another option would be to run your app stand-alone as described above, but then
 use a proxy or load balancer to accept incoming requests (on the standard port
-80, say) and feed them to your Dancer app.
+80, say) and feed them to your Dancer app. Also, in this case you might want
+to look at the C<behind_proxy> configuration option, to make sure that all the
+URLs are constructed properly.
 
-This could be achieved using various software; examples would include:
+    behind_proxy: 1
+
+This setup can be achieved using various software; examples would include:
 
 =head3 Using Apache's mod_proxy
 
@@ -541,7 +545,7 @@ all environments variables in the "run" file.
 =head3 Using HAProxy
 
 C<HAProxy> is a reliable high-performance TCP/HTTP load balancer written in C available from
-L<http://haproxy.1wt.eu/>.
+L<https://www.haproxy.org/>.
 
 Suppose we want to run an application at C<app.example.com:80> and would to use two
 backends listen on hosts C<app-be1.example.com:3000> and C<app-be2.example.com:3000>.
@@ -674,6 +678,39 @@ This example configuration uses a socket:
 Launch your application:
 
     plackup -s FCGI --listen /tmp/fcgi.sock bin/app.psgi
+
+
+=head2 Performance Improvements
+
+The following modules can be used to speed up an app in Dancer2:
+
+=over 4
+
+=item * L<URL::Encode::XS>
+
+=item * L<CGI::Deurl::XS>
+
+=item * L<HTTP::Parser::XS>
+
+=item * L<HTTP::XSCookies>
+
+=item * L<Scope::Upper>
+
+=item * L<Type::Tiny::XS>
+
+=back
+
+They would need to be installed separately. This is because L<Dancer2> does
+not incorporate any C code, but it can get C-code compiled as a module.
+Thus, these modules can be used for speed improvement provided:
+
+=over 4
+
+=item * You have access to a C interpreter
+
+=item * You don't need to fatpack your application
+
+=back
 
 =cut
 

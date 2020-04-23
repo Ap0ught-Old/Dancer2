@@ -5,7 +5,6 @@ use Moo;
 use Carp               qw<croak carp>;
 use Scalar::Util       'blessed';
 use Module::Runtime    'is_module_name';
-use Return::MultiLevel ();
 use Safe::Isa;
 use Sub::Quote;
 use File::Spec;
@@ -153,6 +152,12 @@ has '+local_triggers' => (
                 $self->template_engine->layout($value);
             },
 
+            layout_dir => sub {
+                my $self  = shift;
+                my $value = shift;
+                $self->template_engine->layout_dir($value);
+            },
+
             log => sub {
                 my ( $self, $value, $config ) = @_;
 
@@ -244,7 +249,7 @@ sub _build_session_engine {
         %{$engine_options},
         postponed_hooks => $self->postponed_hooks,
 
-        log_cb => sub { $weak_self->logger_engine->log(@_) },
+        log_cb => sub { $weak_self->log(@_) },
     );
 }
 
@@ -265,10 +270,12 @@ sub _build_template_engine {
     my $engine_options =
           $self->_get_config_for_engine( template => $value, $config );
 
-    my $engine_attrs = { config => $engine_options };
-    $engine_attrs->{layout} ||= $config->{layout};
-    $engine_attrs->{views}  ||= $config->{views}
-        || path( $self->location, 'views' );
+    my $engine_attrs = {
+        config => $engine_options,
+        layout => $config->{layout},
+        layout_dir => ( $config->{layout_dir} || 'layouts' ),
+        views => $config->{views},
+    };
 
     Scalar::Util::weaken( my $weak_self = $self );
 
@@ -277,7 +284,7 @@ sub _build_template_engine {
         %{$engine_attrs},
         postponed_hooks => $self->postponed_hooks,
 
-        log_cb => sub { $weak_self->logger_engine->log(@_) },
+        log_cb => sub { $weak_self->log(@_) },
     );
 }
 
@@ -302,7 +309,7 @@ sub _build_serializer_engine {
         config          => $engine_options,
         postponed_hooks => $self->postponed_hooks,
 
-        log_cb => sub { $weak_self->logger_engine->log(@_) },
+        log_cb => sub { $weak_self->log(@_) },
     );
 }
 
@@ -367,7 +374,8 @@ sub set_request {
     $defined_engines ||= $self->defined_engines;
     # populate request in app and all engines
     $self->_set_request($request);
-    $_->set_request( $request ) for @{$defined_engines};
+    Scalar::Util::weaken( my $weak_request = $request );
+    $_->set_request( $weak_request ) for @{$defined_engines};
 }
 
 has response => (
@@ -471,6 +479,12 @@ has destroyed_session => (
     predicate => 1,
     writer    => 'set_destroyed_session',
     clearer   => 'clear_destroyed_session',
+);
+
+has 'prep_apps' => (
+    'is'      => 'ro',
+    'isa'     => ArrayRef,
+    'default' => sub { [] },
 );
 
 sub find_plugin {
@@ -594,18 +608,6 @@ has routes => (
     },
 );
 
-has 'calling_class' => (
-    'is'      => 'ro',
-    'isa'     => Str,
-    'default' => sub {
-        my $class = ( caller(2) )[0] ||
-                    ( caller(1) )[0] ||
-                    ( caller(0) )[0];
-
-        return $class;
-    },
-);
-
 # add_hook will add the hook to the first "hook candidate" it finds that support
 # it. If none, then it will try to add the hook to the current application.
 around add_hook => sub {
@@ -685,7 +687,7 @@ sub _build_default_config {
         charset        => ( $ENV{DANCER_CHARSET}      || '' ),
         logger         => ( $ENV{DANCER_LOGGER}       || 'console' ),
         views          => ( $ENV{DANCER_VIEWS}
-                            || path( $self->config_location, 'views' ) ),
+                            || path( $self->location, 'views' ) ),
         environment    => $self->environment,
         appdir         => $self->location,
         public_dir     => $public,
@@ -942,15 +944,15 @@ sub send_as {
 
     $type or croak "Can not send_as using an undefined type";
 
-    if ( lc($type) eq 'html' ) {
-        if ( $type ne 'html' ) {
+    if ( lc($type) eq 'html' || lc($type) eq 'plain' ) {
+        if ( $type ne lc $type ) {
             local $Carp::CarpLevel = 2;
-            carp "Please use 'html' as the type for 'send_as', not $type";
+            carp sprintf( "Please use %s as the type for 'send_as', not %s", lc($type), $type );
         }
 
         $options->{charset} = $self->config->{charset} || 'UTF-8';
         my $content = Encode::encode( $options->{charset}, $data );
-        $options->{content_type} ||= 'text/html';
+        $options->{content_type} ||= join '/', 'text', lc $type;
         $self->send_file( \$content, %$options );     # returns from sub
     }
 
@@ -1067,7 +1069,7 @@ sub send_file {
     # content disposition
     ( exists $options{filename} )
       and $self->response->header( 'Content-Disposition' =>
-          "attachment; filename=\"$options{filename}\"" );
+          ($options{content_disposition} || "attachment") . "; filename=\"$options{filename}\"" );
 
     # use a delayed response unless server does not support streaming
     my $use_streaming = exists $options{streaming} ? $options{streaming} : 1;
@@ -1125,10 +1127,9 @@ sub finish {
             $self->postponed_hooks
         );
 
-    $self->calling_class->can('prepare_app')
-      and warn "WARNING: You have a subroutine in your "
-      . "app called 'prepare_app'. In the future "
-      . "this will automatically be called by Dancer2.";
+    foreach my $prep_cb ( @{ $self->prep_apps } ) {
+        $prep_cb->($self);
+    }
 }
 
 sub init_route_handlers {
@@ -1221,8 +1222,11 @@ sub add_route {
     my $self        = shift;
     my %route_attrs = @_;
 
-    my $route =
-      Dancer2::Core::Route->new( %route_attrs, prefix => $self->prefix );
+    my $route = Dancer2::Core::Route->new(
+        type_library => $self->config->{type_library},
+        %route_attrs,
+        prefix => $self->prefix,
+    );
 
     my $method = $route->method;
 
@@ -1268,16 +1272,6 @@ sub redirect {
     my $self        = shift;
     my $destination = shift;
     my $status      = shift;
-
-    # RFC 2616 requires an absolute URI with a scheme,
-    # turn the URI into that if it needs it
-
-    # Scheme grammar as defined in RFC 2396
-    #  scheme = alpha *( alpha | digit | "+" | "-" | "." )
-    my $scheme_re = qr{ [a-z][a-z0-9\+\-\.]* }ix;
-    if ( $destination !~ m{^ $scheme_re : }x ) {
-        $destination = $self->request->uri_for( $destination, {}, 1 );
-    }
 
     $self->response->redirect( $destination, $status );
 
@@ -1397,11 +1391,7 @@ sub to_app {
         return $response;
     };
 
-    # Wrap with common middleware
-    # FixMissingBodyInRedirect
-    $psgi = Plack::Middleware::FixMissingBodyInRedirect->wrap( $psgi );
-
-    # Only add static content handler if requires
+    # Only add static content handler if required
     if ( $self->config->{'static_handler'} ) {
         # Use App::File to "serve" the static content
         my $static_app = Plack::App::File->new(
@@ -1417,8 +1407,14 @@ sub to_app {
         );
     }
 
-    # Apply Head. After static so a HEAD request on static content DWIM.
-    $psgi = Plack::Middleware::Head->wrap( $psgi );
+    # Wrap with common middleware
+    if ( ! $self->config->{'no_default_middleware'} ) {
+        # FixMissingBodyInRedirect
+        $psgi = Plack::Middleware::FixMissingBodyInRedirect->wrap( $psgi );
+        # Apply Head. After static so a HEAD request on static content DWIM.
+        $psgi = Plack::Middleware::Head->wrap( $psgi );
+    }
+
     return $psgi;
 }
 
@@ -1427,10 +1423,25 @@ sub dispatch {
     my $env  = shift;
 
     my $runner  = Dancer2::runner();
-    my $request = $runner->{'internal_request'} ||
-                  $self->build_request($env);
-    my $cname   = $self->session_engine->cookie_name;
+    my $request;
+    my $request_built_successfully = eval {
+        $EVAL_SHIM->(sub {
+            $request = $runner->{'internal_request'} || $self->build_request($env);
+        });
+        1;
+    };
+    # Catch bad content causing deserialization to fail when building the request
+    if ( ! $request_built_successfully ) {
+        my $err = $@;
+        Scalar::Util::weaken(my $app = $self);
+        return Dancer2::Core::Error->new(
+            app     => $app,
+            message => $err,
+            status  => 400,    # 400 Bad request (dont send again), rather than 500
+        )->throw;
+    }
 
+    my $cname = $self->session_engine->cookie_name;
     my $defined_engines = $self->defined_engines;
 
 DISPATCH:
@@ -1463,14 +1474,23 @@ DISPATCH:
             }
 
             # calling the actual route
-            my $response = Return::MultiLevel::with_return {
-                my ($return) = @_;
+            my $response;
 
-                # stash the multilevel return coderef in the app
-                $self->has_with_return
-                    or $self->set_with_return($return);
-
-                return $self->_dispatch_route($route);
+            # this is very evil, but allows breaking out of multiple stack
+            # frames without throwing an exception.  Avoiding exceptions means
+            # a naive eval won't swallow our flow control mechanisms, and
+            # avoids __DIE__ handlers.  It also prevents some cleanup routines
+            # from working, since they are expecting control to return to them
+            # after an eval.
+            DANCER2_CORE_APP_ROUTE_RETURN: {
+                if (!$self->has_with_return) {
+                    $self->set_with_return(sub {
+                        $response = shift;
+                        no warnings 'exiting';
+                        last DANCER2_CORE_APP_ROUTE_RETURN;
+                    });
+                }
+                $response = $self->_dispatch_route($route);
             };
 
             # ensure we clear the with_return handler
@@ -1675,7 +1695,8 @@ that package, thanks to that encapsulation.
 
 =attr with_return
 
-Used to cache the coderef from L<Return::MultiLevel> within the dispatcher.
+Used to cache the coderef that will return from back to the dispatcher, across
+an arbitrary number of stack frames.
 
 =method has_session
 
@@ -1738,7 +1759,7 @@ Just like C<with_plugin>, but for a single plugin.
 
     my $plugin = $app->with_plugin('Foo');
 
-=head2 add_route
+=method add_route
 
 Register a new route handler.
 
@@ -1749,16 +1770,19 @@ Register a new route handler.
         options => $conditions,
     );
 
-=head2 route_exists
+Returns a new L<< Dancer2::Core::Route >> object created with the passed
+arguments.
 
-Check if a route already exists.
+=method route_exists
+
+Returns a true value if a route already exists, otherwise false.
 
     my $route = Dancer2::Core::Route->new(...);
     if ($app->route_exists($route)) {
         ...
     }
 
-=head2 routes_regexps_for
+=method routes_regexps_for
 
 Sugar for getting the ordered list of all registered route regexps by method.
 
@@ -1800,7 +1824,7 @@ For example:
 
     forward '/login', { login_failed => 1 }, { method => 'GET' });
 
-=head2 app
+=method app
 
 Returns itself. This is simply available as a shim to help transition from
 a previous version in which hooks were sent a context object (originally

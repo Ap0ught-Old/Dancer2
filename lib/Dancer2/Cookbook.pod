@@ -340,6 +340,11 @@ variables.
 
 However, disabling the internal layout it will also disable the hooks C<before_layout_render> and C<after_layout_render>.
 
+=head2 Customizing Template Toolkit in Dancer2
+
+Please see L<Dancer2::Template::TemplateToolkit|Dancer2::Template::TemplateToolkit/"ADVANCED CUSTOMIZATION">
+for more details.
+
 =head2 Accessing configuration information from a separate script
 
 You may want to access your webapp's configuration from outside your
@@ -428,13 +433,15 @@ a books key containing an I<arrayref> of strings : the books names.
       }
     ]
 
-# bookstore/views/search.tt
-<p>
-<form action="/search">
-Search query: <input type="text" name="query" />
-</form>
-</p>
-<br>
+
+    # bookstore/views/search.tt
+    <p>
+    <form action="/search">
+    Search query: <input type="text" name="query" />
+    </form>
+    </p>
+    <br>
+
 
 An example of the view, displaying the search form, and the results, if any:
 

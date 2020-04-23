@@ -10,6 +10,7 @@ use Dancer2::FileUtils qw/path open_file/;
 use Sub::Quote;
 use Module::Runtime 'require_module';
 use Ref::Util qw< is_hashref >;
+use Clone qw(clone);
 
 has app => (
     is        => 'ro',
@@ -139,14 +140,15 @@ END_TEMPLATE
     return $output;
 }
 
+# status and message are 'rw' to permit modification in core.error.before hooks
 has status => (
-    is      => 'ro',
+    is      => 'rw',
     default => sub {500},
     isa     => Num,
 );
 
 has message => (
-    is      => 'ro',
+    is      => 'rw',
     isa     => Str,
     lazy    => 1,
     default => sub { '' },
@@ -202,7 +204,14 @@ has response => (
     default => sub {
         my $self = shift;
         my $serializer = $self->serializer;
+        # include server tokens in response ?
+        my $no_server_tokens = $self->has_app
+            ? $self->app->config->{'no_server_tokens'}
+            : defined $ENV{DANCER_NO_SERVER_TOKENS}
+                ? $ENV{DANCER_NO_SERVER_TOKENS}
+                : 0;
         return Dancer2::Core::Response->new(
+            server_tokens => !$no_server_tokens,
             ( serializer => $serializer )x!! $serializer
         );
     }
@@ -264,9 +273,11 @@ sub _build_content {
         return $content if defined $content;
     }
 
-    # It doesn't make sense to return a static page if show_errors is on
-    if ( !$self->show_errors && (my $content = $self->static_page) ) {
-        return $content;
+    # It doesn't make sense to return a static page for a 500 if show_errors is on
+    if ( !($self->show_errors && $self->status eq '500') ) {
+         if ( my $content = $self->static_page ) {
+             return $content;
+         }
     }
 
     if ($self->has_app && $self->app->config->{error_template}) {
@@ -359,11 +370,11 @@ sub dumper {
     my $obj = shift;
 
     # Take a copy of the data, so we can mask sensitive-looking stuff:
-    my %data     = %$obj;
-    my $censored = _censor( \%data );
+    my $data     = clone($obj);
+    my $censored = _censor( $data );
 
     #use Data::Dumper;
-    my $dd = Data::Dumper->new( [ \%data ] );
+    my $dd = Data::Dumper->new( [ $data ] );
     my $hash_separator = '  @@!%,+$$#._(--  '; # Very unlikely string to exist already
     my $prefix_padding = '  #+#+@%.,$_-!((  '; # Very unlikely string to exist already
     $dd->Terse(1)->Quotekeys(0)->Indent(1)->Sortkeys(1)->Pair($hash_separator)->Pad($prefix_padding);
@@ -417,6 +428,8 @@ sub get_caller {
 
 sub _censor {
     my $hash = shift;
+    my $visited = shift || {};
+
     unless ( $hash && is_hashref($hash) ) {
         carp "_censor given incorrect input: $hash";
         return;
@@ -425,9 +438,12 @@ sub _censor {
     my $censored = 0;
     for my $key ( keys %$hash ) {
         if ( is_hashref( $hash->{$key} ) ) {
-            # Take a copy of the data, so we can hide sensitive-looking stuff:
-            $hash->{$key} = { %{ $hash->{$key} } };
-            $censored += _censor( $hash->{$key} );
+            if (!$visited->{ $hash->{$key} }) {
+                # mark the new ref as visited
+                $visited->{ $hash->{$key} } = 1;
+
+                $censored += _censor( $hash->{$key}, $visited );
+            }
         }
         elsif ( $key =~ /(pass|card?num|pan|secret)/i ) {
             $hash->{$key} = "Hidden (looks potentially sensitive)";

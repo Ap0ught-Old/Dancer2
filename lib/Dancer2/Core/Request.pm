@@ -7,7 +7,6 @@ use parent 'Plack::Request';
 
 use Carp;
 use Encode;
-use HTTP::Body;
 use URI;
 use URI::Escape;
 use Safe::Isa;
@@ -70,19 +69,11 @@ sub new {
     $self->{'vars'}            = {};
     $self->{'is_behind_proxy'} = !!$opts{'is_behind_proxy'};
 
-    # parameters
-    $self->{_chunk_size}       = 4096;
-    $self->{_read_position}    = 0;
-    $self->{_http_body} =
-      HTTP::Body->new( $self->content_type || '', $self->content_length );
-    $self->{_http_body}->cleanup(1);
-
     $opts{'body_params'}
         and $self->{'_body_params'} = $opts{'body_params'};
 
     # Deserialize/parse body for HMV
     $self->data;
-    $self->body_parameters;
     $self->_build_uploads();
 
     return $self;
@@ -104,7 +95,7 @@ sub var {
 sub set_path_info { $_[0]->env->{'PATH_INFO'} = $_[1] }
 
 # XXX: incompatible with Plack::Request
-sub body { $_[0]->{'body'} ||= $_[0]->_read_to_end }
+sub body { $_[0]->raw_body }
 
 sub id { $_id }
 
@@ -119,14 +110,7 @@ sub _params { $_[0]->{'_params'} ||= $_[0]->_build_params }
 
 sub _has_params { defined $_[0]->{'_params'} }
 
-sub _body_params {
-    my $self = shift;
-
-    # make sure body is parsed
-    $self->body;
-
-    $self->{'_body_params'} ||= _decode( $self->{'_http_body'}->param );
-}
+sub _body_params { $_[0]->{'_body_params'} ||= $_[0]->body_parameters->as_hashref_mixed }
 
 sub _query_params { $_[0]->{'_query_params'} }
 
@@ -203,8 +187,25 @@ sub deserialize {
     $body && length $body > 0
         or return;
 
+    # Catch serializer fails - which is tricky as Role::Serializer
+    # wraps the deserializaion in an eval and returns undef.
+    # We want to generate a 500 error on serialization fail (Ref #794)
+    # to achieve that, override the log callback so we can catch a signal
+    # that it failed. This is messy (messes with serializer internals), but
+    # "works".
+    my $serializer_fail;
+    my $serializer_log_cb = $serializer->log_cb;
+    local $serializer->{log_cb} = sub {
+        $serializer_fail = $_[1];
+        $serializer_log_cb->(@_);
+    };
+    # work-around to resolve a chicken-and-egg issue when instantiating a
+    # request object; the serializer needs that request object to deserialize
+    # the body params.
+    Scalar::Util::weaken( my $request = $self );
+    $self->serializer->has_request || $self->serializer->set_request($request);
     my $data = $serializer->deserialize($body);
-    return if !defined $data;
+    die $serializer_fail if $serializer_fail;
 
     # Set _body_params directly rather than using the setter. Deserializiation
     # returns characters and skipping the decode op in the setter ensures
@@ -499,71 +500,23 @@ sub _parse_get_params {
     return $self->_query_params;
 }
 
-sub _read_to_end {
-    my ($self) = @_;
-
-    my $content_length = $self->content_length;
-    return unless $self->_has_something_to_read();
-
-    my $body = '';
-    if ( $content_length && $content_length > 0 ) {
-        while ( defined ( my $buffer = $self->_read() ) ) {
-            $body .= $buffer;
-        }
-        $self->{_http_body}->add($body);
-    }
-
-    return $body;
-}
-
-sub _has_something_to_read {
-    my ($self) = @_;
-    return 0 unless defined $self->input_handle;
-}
-
-# taken from Miyagawa's Plack::Request::BodyParser
-sub _read {
-    my ( $self ) = @_;
-    my $remaining = $self->content_length - $self->{_read_position};
-    my $maxlength = $self->{_chunk_size};
-
-    return if ( $remaining <= 0 );
-
-    my $readlen = ( $remaining > $maxlength ) ? $maxlength : $remaining;
-    my $buffer;
-    my $rc;
-
-    $rc = $self->input_handle->read( $buffer, $readlen );
-
-    if ( defined $rc ) {
-        $self->{_read_position} += $rc;
-        return $buffer;
-    }
-    else {
-        croak "Unknown error reading input: $!";
-    }
-}
-
-# Taken gently from Plack::Request, thanks to Plack authors.
 sub _build_uploads {
     my ($self) = @_;
 
-    # build the body and body params
+    # parse body and build body params
     my $body_params = $self->_body_params;
 
-    my $uploads = _decode( $self->{_http_body}->upload );
+    my $uploads = $self->SUPER::uploads;
     my %uploads;
 
-    for my $name ( keys %{$uploads} ) {
-        my $files = $uploads->{$name};
-        $files = is_arrayref($files) ? $files : [$files];
-
+    for my $name ( keys %$uploads ) {
         my @uploads = map Dancer2::Core::Request::Upload->new(
-                              headers  => $_->{headers},
-                              tempname => $_->{tempname},
-                              size     => $_->{size},
-                              filename => $_->{filename},
-                      ), @{$files};
+                             # For back-compatibility, we use a HashRef of headers
+                             headers  => {@{$_->{headers}->psgi_flatten_without_sort}},
+                             tempname => $_->{tempname},
+                             size     => $_->{size},
+                             filename => _decode( $_->{filename} ),
+                      ), $uploads->get_all($name);
 
         $uploads{$name} = @uploads > 1 ? \@uploads : $uploads[0];
 
@@ -598,7 +551,8 @@ sub _build_cookies {
     while (my ($name, $value) = each %{$cookies}) {
         $cookies->{$name} = Dancer2::Core::Cookie->new(
             name  => $name,
-            value => [split(/[&;]/, $value)]
+            # HTTP::XSCookies v0.17+ will do the split and return an arrayref
+            value => (is_arrayref($value) ? $value : [split(/[&;]/, $value)])
         );
     }
     return $cookies;
@@ -611,11 +565,6 @@ sub _shallow_clone {
     # shallow clone $env; we don't want to alter the existing one
     # in $self, then merge any overridden values
     my $env = { %{ $self->env }, %{ $options || {} } };
-
-    # request body fh has been read till end
-    # delete CONTENT_LENGTH in new request (no need to parse body again)
-    # and merge existing params
-    delete $env->{CONTENT_LENGTH};
 
     my $new_request = __PACKAGE__->new(
         env         => $env,
@@ -637,7 +586,6 @@ sub _shallow_clone {
     $new_request->{_params}       = $new_params;
     $new_request->{_body_params}  = $self->{_body_params};
     $new_request->{_route_params} = $self->{_route_params};
-    $new_request->{body}          = $self->body;
     $new_request->{headers}       = $self->headers;
 
     # Copy remaining settings
